@@ -15,10 +15,10 @@ def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
     return nn.Sequential(*layers)
 
 def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2, 
-          epochs=50, batch_size=5000, render=False):
+          epochs=50, batch_size=5000, render=False, render_mode=None):
 
     # make environment, check spaces, get obs / act dims
-    env = gym.make(env_name)
+    env = gym.make(env_name, render_mode=render_mode)
     assert isinstance(env.observation_space, Box), \
         "This example only works for envs with continuous state spaces."
     assert isinstance(env.action_space, Discrete), \
@@ -28,6 +28,8 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
     n_acts = env.action_space.n
 
     # make core of policy network
+    # For example, for CartPole-v1, sizes = [4, hidden_size, 2].
+    # And so logits_net has two layers, nn.Linear(4, hidden_size) and nn.Linear(hidden_size, 2)
     logits_net = mlp(sizes=[obs_dim]+hidden_sizes+[n_acts])
 
     # make function to compute action distribution
@@ -65,7 +67,7 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
         finished_rendering_this_epoch = False
 
         # collect experience by acting in the environment with current policy
-        while True:
+        while True:  # until we have see #batch_size observations
 
             # rendering
             if (not finished_rendering_this_epoch) and render:
@@ -103,10 +105,11 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
                     break
 
         # take a single policy gradient update step
+        # step once per batch_size, default 5000
         optimizer.zero_grad()
-        batch_loss = compute_loss(obs=torch.as_tensor(batch_obs, dtype=torch.float32),
-                                  act=torch.as_tensor(batch_acts, dtype=torch.int32),
-                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32)
+        batch_loss = compute_loss(obs=torch.as_tensor(np.array(batch_obs), dtype=torch.float32),
+                                  act=torch.as_tensor(np.array(batch_acts), dtype=torch.int32),
+                                  weights=torch.as_tensor(np.array(batch_weights), dtype=torch.float32)
                                   )
         batch_loss.backward()
         optimizer.step()
@@ -123,7 +126,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--env_name', '--env', type=str, default='CartPole-v1')
     parser.add_argument('--render', action='store_true')
+    parser.add_argument('--render_mode', type=str, default=None)
     parser.add_argument('--lr', type=float, default=1e-2)
     args = parser.parse_args()
     print('\nUsing simplest formulation of policy gradient.\n')
-    train(env_name=args.env_name, render=args.render, lr=args.lr)
+    train(env_name=args.env_name, render=args.render, lr=args.lr, render_mode=args.render_mode)
