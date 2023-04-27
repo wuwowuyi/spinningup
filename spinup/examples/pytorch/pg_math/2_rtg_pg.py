@@ -122,8 +122,8 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
     # training loop
     for i in range(epochs):
         batch_loss, batch_rets, batch_lens = train_one_epoch()
-        print('epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f'%
-                (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens)))
+        print('epoch: %3d \t loss: %.3f \t return: %.3f \t ep_len: %.3f \t num_ep: %3d'%
+                (i, batch_loss, np.mean(batch_rets), np.mean(batch_lens), len(batch_rets)))
 
 if __name__ == '__main__':
     import argparse
