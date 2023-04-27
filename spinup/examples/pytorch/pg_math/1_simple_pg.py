@@ -70,7 +70,7 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
         while True:  # until we have see #batch_size observations
 
             # rendering
-            if (not finished_rendering_this_epoch) and render:
+            if (not finished_rendering_this_epoch) and render and render_mode:
                 env.render()
 
             # save obs

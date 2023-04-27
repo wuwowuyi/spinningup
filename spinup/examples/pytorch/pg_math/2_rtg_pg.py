@@ -3,8 +3,8 @@ import torch.nn as nn
 from torch.distributions.categorical import Categorical
 from torch.optim import Adam
 import numpy as np
-import gym
-from gym.spaces import Discrete, Box
+import gymnasium as gym
+from gymnasium.spaces import Discrete, Box
 
 def mlp(sizes, activation=nn.Tanh, output_activation=nn.Identity):
     # Build a feedforward neural network.
@@ -22,10 +22,10 @@ def reward_to_go(rews):
     return rtgs
 
 def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2, 
-          epochs=50, batch_size=5000, render=False):
+          epochs=50, batch_size=5000, render=False, render_mode=None):
 
     # make environment, check spaces, get obs / act dims
-    env = gym.make(env_name)
+    env = gym.make(env_name, render_mode=render_mode)
     assert isinstance(env.observation_space, Box), \
         "This example only works for envs with continuous state spaces."
     assert isinstance(env.action_space, Discrete), \
@@ -64,7 +64,7 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
         batch_lens = []         # for measuring episode lengths
 
         # reset episode-specific variables
-        obs = env.reset()       # first obs comes from starting distribution
+        obs, _ = env.reset()       # first obs comes from starting distribution
         done = False            # signal from environment that episode is over
         ep_rews = []            # list for rewards accrued throughout ep
 
@@ -75,7 +75,7 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
         while True:
 
             # rendering
-            if (not finished_rendering_this_epoch) and render:
+            if (not finished_rendering_this_epoch) and render and render_mode:
                 env.render()
 
             # save obs
@@ -83,7 +83,8 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
 
             # act in the environment
             act = get_action(torch.as_tensor(obs, dtype=torch.float32))
-            obs, rew, done, _ = env.step(act)
+            obs, rew, terminated, truncated, _, = env.step(act)
+            done = terminated or truncated
 
             # save action, reward
             batch_acts.append(act)
@@ -99,7 +100,7 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
                 batch_weights += list(reward_to_go(ep_rews))
 
                 # reset episode-specific variables
-                obs, done, ep_rews = env.reset(), False, []
+                (obs, _), done, ep_rews = env.reset(), False, []
 
                 # won't render again this epoch
                 finished_rendering_this_epoch = True
@@ -110,9 +111,9 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
 
         # take a single policy gradient update step
         optimizer.zero_grad()
-        batch_loss = compute_loss(obs=torch.as_tensor(batch_obs, dtype=torch.float32),
-                                  act=torch.as_tensor(batch_acts, dtype=torch.int32),
-                                  weights=torch.as_tensor(batch_weights, dtype=torch.float32)
+        batch_loss = compute_loss(obs=torch.as_tensor(np.array(batch_obs), dtype=torch.float32),
+                                  act=torch.as_tensor(np.array(batch_acts), dtype=torch.int32),
+                                  weights=torch.as_tensor(np.array(batch_weights), dtype=torch.float32)
                                   )
         batch_loss.backward()
         optimizer.step()
@@ -127,9 +128,10 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
 if __name__ == '__main__':
     import argparse
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env_name', '--env', type=str, default='CartPole-v0')
+    parser.add_argument('--env_name', '--env', type=str, default='CartPole-v1')
     parser.add_argument('--render', action='store_true')
+    parser.add_argument('--render_mode', type=str, default=None)
     parser.add_argument('--lr', type=float, default=1e-2)
     args = parser.parse_args()
     print('\nUsing reward-to-go formulation of policy gradient.\n')
-    train(env_name=args.env_name, render=args.render, lr=args.lr)
+    train(env_name=args.env_name, render=args.render, lr=args.lr, render_mode=args.render_mode)
