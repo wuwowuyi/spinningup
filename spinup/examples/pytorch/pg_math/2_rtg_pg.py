@@ -18,7 +18,7 @@ def reward_to_go(rews):
     n = len(rews)
     rtgs = np.zeros_like(rews)
     for i in reversed(range(n)):
-        rtgs[i] = rews[i] + (rtgs[i+1] if i+1 < n else 0)
+        rtgs[i] = rews[i] + (rtgs[i+1] if i+1 < n else 0)  # Bellman equation
     return rtgs
 
 def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2, 

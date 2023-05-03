@@ -29,7 +29,7 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
 
     # make core of policy network
     # For example, for CartPole-v1, sizes = [4, hidden_size, 2].
-    # And so logits_net has two layers, nn.Linear(4, hidden_size) and nn.Linear(hidden_size, 2)
+    # So logits_net has two layers, nn.Linear(4, hidden_size) and nn.Linear(hidden_size, 2)
     logits_net = mlp(sizes=[obs_dim]+hidden_sizes+[n_acts])
 
     # make function to compute action distribution
