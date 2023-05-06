@@ -1,6 +1,6 @@
 import numpy as np
 import scipy.signal
-from gym.spaces import Box, Discrete
+from gymnasium.spaces import Box, Discrete
 
 import torch
 import torch.nn as nn
@@ -126,9 +126,9 @@ class MLPActorCritic(nn.Module):
     def step(self, obs):
         with torch.no_grad():
             pi = self.pi._distribution(obs)
-            a = pi.sample()
+            a = pi.sample()  # sample an action from actor
             logp_a = self.pi._log_prob_from_distribution(pi, a)
-            v = self.v(obs)
+            v = self.v(obs)  # sample value from critic
         return a.numpy(), v.numpy(), logp_a.numpy()
 
     def act(self, obs):
