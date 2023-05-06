@@ -195,9 +195,6 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Create actor-critic module
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
 
-    # Sync params across processes
-    # sync_params(ac)
-
     # Count variables
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.v])
     logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n' % var_counts)
