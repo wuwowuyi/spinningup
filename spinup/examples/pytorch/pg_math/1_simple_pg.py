@@ -67,7 +67,8 @@ def train(env_name='CartPole-v0', hidden_sizes=[32], lr=1e-2,
         finished_rendering_this_epoch = False
 
         # collect experience by acting in the environment with current policy
-        while True:  # until we have see #batch_size observations
+        # terminate if 1) we have see #batch_size observations. 2) at the end of an episode
+        while True:
 
             # rendering
             if (not finished_rendering_this_epoch) and render and render_mode:
