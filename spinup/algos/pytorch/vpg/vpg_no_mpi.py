@@ -178,9 +178,6 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     """
 
-    # Special function to avoid certain slowdowns from PyTorch + MPI combo.
-    # setup_pytorch_for_mpi()
-
     # Set up logger and save configuration
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
