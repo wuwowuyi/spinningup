@@ -55,19 +55,19 @@ class VPGBuffer:
         This allows us to bootstrap the reward-to-go calculation to account
         for timesteps beyond the arbitrary episode horizon (or epoch cutoff).
         """
-        # from o_t (i.e., s_t), we sample action a_t, and critic's value v(s_t)
-        # apply action a_t to env to get o_t+1 (i.e., s_t+1), rews_t (not rews_t+1)
+        # from o_t (s_t), we sample action a_t, and critic's value V(o_t)
+        # apply action a_t to env to get o_t+1 (s_t+1), rews_t (not rews_t+1)
 
         path_slice = slice(self.path_start_idx, self.ptr)
-        rews = np.append(self.rew_buf[path_slice], last_val)
+        rews = self.rew_buf[path_slice]
         vals = np.append(self.val_buf[path_slice], last_val)
 
         # the next two lines implement GAE-Lambda advantage calculation
-        deltas = rews[:-1] + self.gamma * vals[1:] - vals[:-1]
+        deltas = rews + self.gamma * vals[1:] - vals[:-1]  # goodness(a_t) = r(o_t, a_t) + V(o_t+1) - V(o_t)
         self.adv_buf[path_slice] = core.discount_cumsum(deltas, self.gamma * self.lam)
 
         # the next line computes rewards-to-go, to be targets for the value function
-        self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)[:-1]
+        self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)
 
         self.path_start_idx = self.ptr
 
@@ -89,7 +89,7 @@ class VPGBuffer:
 
 def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, pi_lr=3e-4,
-        vf_lr=1e-3, train_v_iters=80, lam=0.97, max_ep_len=1000,
+        vf_lr=1e-3, train_v_iters=80, lam=0.97,
         logger_kwargs=dict(), save_freq=10):
     """
     Vanilla Policy Gradient
@@ -234,9 +234,10 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         data = buf.get()
 
         # Get loss and info values before update
-        # why do the computation here? data do not change
+        # TODO: why do the computation here? data do not change
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
+
         v_l_old = compute_loss_v(data).item()
 
         # Train policy with a single step of gradient descent
@@ -280,20 +281,17 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             # Update obs (critical!)
             o = next_o
 
-            timeout = ep_len == max_ep_len
-            terminal = d or timeout
             epoch_ended = t == local_steps_per_epoch - 1
-
-            if terminal or epoch_ended:
-                if epoch_ended and not (terminal):
+            if d or epoch_ended:
+                if epoch_ended and not d:
                     print('Warning: trajectory cut off by epoch at %d steps.' % ep_len, flush=True)
                 # if trajectory didn't reach terminal state, bootstrap value target
-                if timeout or epoch_ended:
+                if truncated or epoch_ended:
                     _, v, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
                 else:
                     v = 0
                 buf.finish_path(v)
-                if terminal:
+                if d:
                     # only save EpRet / EpLen if trajectory finished
                     logger.store(EpRet=ep_ret, EpLen=ep_len)
                 (o, _), ep_ret, ep_len = env.reset(), 0, 0
