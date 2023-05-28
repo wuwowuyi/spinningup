@@ -1,7 +1,9 @@
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 from mpi4py import MPI
 from spinup.utils.mpi_tools import broadcast
+
+tf.disable_v2_behavior()
 
 
 def flat_concat(xs):
@@ -26,7 +28,7 @@ def sync_all_params():
     return sync_params(tf.global_variables())
 
 
-class MpiAdamOptimizer(tf.optimizers.Adam):
+class MpiAdamOptimizer(tf.train.AdamOptimizer):
     """
     Adam optimizer that averages gradients across MPI processes.
 

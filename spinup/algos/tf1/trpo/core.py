@@ -1,7 +1,10 @@
 import numpy as np
-import tensorflow as tf
+import tensorflow.compat.v1 as tf
 import scipy.signal
 from gymnasium.spaces import Box, Discrete
+
+
+tf.disable_v2_behavior()
 
 EPS = 1e-8
 
