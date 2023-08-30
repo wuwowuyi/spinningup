@@ -45,11 +45,25 @@ def discount_cumsum(x, discount):
 
 
 class Actor(nn.Module):
+    """Policy net (Actor). """
 
     def _distribution(self, obs):
+        """
+        Generate action distribution with given observation.
+
+        :param obs: obveration
+        :return: action distribution
+        """
         raise NotImplementedError
 
     def _log_prob_from_distribution(self, pi, act):
+        """
+        Compute log-likelihood of given action act.
+
+        :param pi: Probability distribution of actions.
+        :param act: an action
+        :return: log likelihood of act.
+        """
         raise NotImplementedError
 
     def forward(self, obs, act=None):
@@ -81,7 +95,7 @@ class MLPGaussianActor(Actor):
 
     def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
         super().__init__()
-        log_std = -0.5 * np.ones(act_dim, dtype=np.float32)
+        log_std = -0.5 * np.ones(act_dim, dtype=np.float32)  # initial std. e^(-0.5)=0.6
         self.log_std = torch.nn.Parameter(torch.as_tensor(log_std))
         self.mu_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
 
@@ -95,6 +109,8 @@ class MLPGaussianActor(Actor):
 
 
 class MLPCritic(nn.Module):
+    """Value function (Critic).
+    """
 
     def __init__(self, obs_dim, hidden_sizes, activation):
         super().__init__()
@@ -104,10 +120,7 @@ class MLPCritic(nn.Module):
         return torch.squeeze(self.v_net(obs), -1) # Critical to ensure v has right shape.
 
 
-
 class MLPActorCritic(nn.Module):
-
-
     def __init__(self, observation_space, action_space, 
                  hidden_sizes=(64,64), activation=nn.Tanh):
         super().__init__()
@@ -121,9 +134,19 @@ class MLPActorCritic(nn.Module):
             self.pi = MLPCategoricalActor(obs_dim, action_space.n, hidden_sizes, activation)
 
         # build value function
-        self.v  = MLPCritic(obs_dim, hidden_sizes, activation)
+        self.v = MLPCritic(obs_dim, hidden_sizes, activation)
 
     def step(self, obs):
+        """
+        Sample an action based on observation obs.
+        Returned values are all in numpy arrays.
+
+        :param obs: observation
+        :return:
+         - action proposed
+         - value of observation from critic
+         - log likelihood of action proposed
+        """
         with torch.no_grad():
             pi = self.pi._distribution(obs)
             a = pi.sample()  # sample an action from actor

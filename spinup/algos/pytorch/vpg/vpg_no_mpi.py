@@ -33,11 +33,11 @@ class VPGBuffer:
         Append one timestep of agent-environment interaction to the buffer.
         """
         assert self.ptr < self.max_size  # buffer has to have room so you can store
-        self.obs_buf[self.ptr] = obs
-        self.act_buf[self.ptr] = act
-        self.rew_buf[self.ptr] = rew
-        self.val_buf[self.ptr] = val
-        self.logp_buf[self.ptr] = logp
+        self.obs_buf[self.ptr] = obs  # observation o_t
+        self.act_buf[self.ptr] = act  # action a_t
+        self.rew_buf[self.ptr] = rew  # reward r_t
+        self.val_buf[self.ptr] = val  # value function v(o_t)
+        self.logp_buf[self.ptr] = logp  # log likelihood of a_t
         self.ptr += 1
 
     def finish_path(self, last_val=0):
@@ -55,7 +55,7 @@ class VPGBuffer:
         This allows us to bootstrap the reward-to-go calculation to account
         for timesteps beyond the arbitrary episode horizon (or epoch cutoff).
         """
-        # from o_t (s_t), we sample action a_t, and critic's value V(o_t)
+        # from o_t (s_t), we get action a_t, and critic's value v(o_t)
         # apply action a_t to env to get o_t+1 (s_t+1), rews_t (not rews_t+1)
 
         path_slice = slice(self.path_start_idx, self.ptr)
@@ -63,11 +63,12 @@ class VPGBuffer:
         vals = np.append(self.val_buf[path_slice], last_val)
 
         # the next two lines implement GAE-Lambda advantage calculation
-        deltas = rews + self.gamma * vals[1:] - vals[:-1]  # goodness(a_t) = r(o_t, a_t) + V(o_t+1) - V(o_t)
-        self.adv_buf[path_slice] = core.discount_cumsum(deltas, self.gamma * self.lam)
+        # delta_t = r(o_t, a_t) + gamma * v(o_t+1) - v(o_t)
+        deltas = rews + self.gamma * vals[1:] - vals[:-1]
+        self.adv_buf[path_slice] = core.discount_cumsum(deltas, self.gamma * self.lam)  # advantages
 
         # the next line computes rewards-to-go, to be targets for the value function
-        self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)
+        self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)  # returns
 
         self.path_start_idx = self.ptr
 
@@ -82,6 +83,7 @@ class VPGBuffer:
         # the next two lines implement the advantage normalization trick
         adv_mean, adv_std = mpi_statistics_scalar(self.adv_buf)
         self.adv_buf = (self.adv_buf - adv_mean) / adv_std
+
         data = dict(obs=self.obs_buf, act=self.act_buf, ret=self.ret_buf,
                     adv=self.adv_buf, logp=self.logp_buf)
         return {k: torch.as_tensor(v, dtype=torch.float32) for k, v in data.items()}
@@ -89,7 +91,7 @@ class VPGBuffer:
 
 def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, pi_lr=3e-4,
-        vf_lr=1e-3, train_v_iters=80, lam=0.97,
+        vf_lr=1e-3, train_v_iters=80, lam=0.97, max_ep_len=1000,
         logger_kwargs=dict(), save_freq=10):
     """
     Vanilla Policy Gradient
@@ -188,7 +190,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     np.random.seed(seed)
 
     # Instantiate environment
-    env = env_fn()
+    env = env_fn(max_ep_len)
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
 
@@ -212,7 +214,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         loss_pi = -(logp * adv).mean()
 
         # Useful extra info
-        approx_kl = (logp_old - logp).mean().item()
+        approx_kl = (logp_old - logp).mean().item()  # about 2e-9
         ent = pi.entropy().mean().item()
         pi_info = dict(kl=approx_kl, ent=ent)
 
@@ -237,7 +239,6 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         # TODO: why do the computation here? data do not change
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
-
         v_l_old = compute_loss_v(data).item()
 
         # Train policy with a single step of gradient descent
@@ -247,7 +248,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         pi_optimizer.step()
 
         # Value function learning
-        for i in range(train_v_iters):
+        for i in range(train_v_iters):  # multiple steps on value function
             vf_optimizer.zero_grad()
             loss_v = compute_loss_v(data)
             loss_v.backward()
@@ -262,7 +263,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Prepare for interaction with environment
     start_time = time.time()
-    (o, _), ep_ret, ep_len = env.reset(), 0, 0
+    (o, _), ep_ret, ep_len = env.reset(), 0, 0  # ep_ret: undiscounted return of episode
 
     # Main loop: collect experience in env and update/log each epoch
     for epoch in range(epochs):
@@ -301,7 +302,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             logger.save_state({'env': env}, None)
 
         # Perform VPG update!
-        update()  # once every episode.
+        update()  # contains at least #n= local_steps_per_epoch/max_ep_len episodes
 
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
@@ -338,7 +339,7 @@ if __name__ == '__main__':
 
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    vpg(lambda: gym.make(args.env), actor_critic=core.MLPActorCritic,
+    vpg(lambda x: gym.make(args.env, max_episode_steps=x), actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs,
         logger_kwargs=logger_kwargs)
