@@ -200,12 +200,12 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.v])
 
     # setup tensorboard
-    writer = SummaryWriter(f'runs/vpg/{env.spec.id}-{datetime.now().strftime("%y-%m-%d %H%M%S")}')
+    writer = SummaryWriter(f'runs/{env.spec.id}-{datetime.now().strftime("%y-%m-%d %H%M%S")}')
     writer.add_text('hyperparameters',
-        json.dumps(dict(env=env.spec.id, seed=0, vf_lr=1e-3, pi_lr=3e-4, gamma=0.99, lam=0.97,
+        json.dumps(dict(env=env.spec.id, seed=seed, vf_lr=vf_lr, pi_lr=pi_lr, gamma=gamma, lam=lam,
         pi_n_param=var_counts[0].item(), v_n_param=var_counts[1].item(),
         ac_kwargs=','.join(str(i) for i in ac_kwargs['hidden_sizes']),
-        steps_per_epoch=4000, epochs=50, max_ep_len=1000, train_v_iters=80)))
+        steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=max_ep_len, train_v_iters=train_v_iters)))
 
     # Set up experience buffer
     local_steps_per_epoch = steps_per_epoch
