@@ -5,8 +5,7 @@ import gymnasium as gym
 import time
 import spinup.algos.pytorch.ppo.core as core
 from spinup.utils.logx import EpochLogger
-from spinup.utils.mpi_pytorch import setup_pytorch_for_mpi, sync_params, mpi_avg_grads
-from spinup.utils.mpi_tools import mpi_fork, mpi_avg, proc_id, mpi_statistics_scalar, num_procs
+from spinup.utils.mpi_tools import proc_id, mpi_statistics_scalar
 
 
 class PPOBuffer:
@@ -191,9 +190,6 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     """
 
-    # Special function to avoid certain slowdowns from PyTorch + MPI combo.
-    setup_pytorch_for_mpi()
-
     # Set up logger and save configuration
     logger = EpochLogger(**logger_kwargs)
     logger.save_config(locals())
@@ -211,15 +207,12 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Create actor-critic module
     ac = actor_critic(env.observation_space, env.action_space, **ac_kwargs)
 
-    # Sync params across processes
-    sync_params(ac)
-
     # Count variables
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.v])
     logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n' % var_counts)
 
     # Set up experience buffer
-    local_steps_per_epoch = int(steps_per_epoch / num_procs())
+    local_steps_per_epoch = steps_per_epoch
     buf = PPOBuffer(obs_dim, act_dim, local_steps_per_epoch, gamma, lam)
 
     # Set up function for computing PPO policy loss
@@ -264,12 +257,11 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         for i in range(train_pi_iters):
             pi_optimizer.zero_grad()
             loss_pi, pi_info = compute_loss_pi(data)
-            kl = mpi_avg(pi_info['kl'])
+            kl = pi_info['kl']
             if kl > 1.5 * target_kl:
                 logger.log('Early stopping at step %d due to reaching max kl.' % i)
                 break
             loss_pi.backward()
-            mpi_avg_grads(ac.pi)  # average grads across MPI processes
             pi_optimizer.step()
 
         logger.store(StopIter=i)
@@ -279,7 +271,6 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             vf_optimizer.zero_grad()
             loss_v = compute_loss_v(data)
             loss_v.backward()
-            mpi_avg_grads(ac.v)  # average grads across MPI processes
             vf_optimizer.step()
 
         # Log changes from update
@@ -368,10 +359,7 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='ppo')
     args = parser.parse_args()
 
-    mpi_fork(args.cpu)  # run parallel code with mpi
-
     from spinup.utils.run_utils import setup_logger_kwargs
-
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
     ppo(lambda: gym.make(args.env), actor_critic=core.MLPActorCritic,
