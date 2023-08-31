@@ -1,8 +1,14 @@
+import json
+from datetime import datetime
+
 import numpy as np
 import torch
 from torch.optim import Adam
 import gymnasium as gym
 import time
+
+from torch.utils.tensorboard import SummaryWriter
+
 import spinup.algos.pytorch.ppo.core as core
 from spinup.utils.logx import EpochLogger
 from spinup.utils.mpi_tools import proc_id, mpi_statistics_scalar
@@ -86,7 +92,7 @@ class PPOBuffer:
 def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         steps_per_epoch=4000, epochs=50, gamma=0.99, clip_ratio=0.2, pi_lr=3e-4,
         vf_lr=1e-3, train_pi_iters=80, train_v_iters=80, lam=0.97, max_ep_len=1000,
-        target_kl=0.01, logger_kwargs=dict(), save_freq=10):
+        target_kl=0.01, save_freq=10):
     """
     Proximal Policy Optimization (by clipping),
 
@@ -190,10 +196,6 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     """
 
-    # Set up logger and save configuration
-    logger = EpochLogger(**logger_kwargs)
-    logger.save_config(locals())
-
     # Random seed
     seed += 10000 * proc_id()
     torch.manual_seed(seed)
@@ -209,7 +211,16 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
     # Count variables
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.v])
-    logger.log('\nNumber of parameters: \t pi: %d, \t v: %d\n' % var_counts)
+
+    # setup tensorboard
+    writer = SummaryWriter(f'runs/{env.spec.id}-{datetime.now().strftime("%y-%m-%d %H%M%S")}')
+    writer.add_text('hyperparameters',
+                    json.dumps(dict(env=env.spec.id, seed=seed, vf_lr=vf_lr, pi_lr=pi_lr, gamma=gamma, lam=lam,
+                                    clip_ratio=clip_ratio, target_kl=target_kl,
+                                    pi_n_param=var_counts[0].item(), v_n_param=var_counts[1].item(),
+                                    ac_kwargs=','.join(str(i) for i in ac_kwargs['hidden_sizes']),
+                                    steps_per_epoch=steps_per_epoch, epochs=epochs, max_ep_len=max_ep_len,
+                                    train_pi_iters=train_pi_iters, train_v_iters=train_v_iters)))
 
     # Set up experience buffer
     local_steps_per_epoch = steps_per_epoch
@@ -243,10 +254,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     pi_optimizer = Adam(ac.pi.parameters(), lr=pi_lr)
     vf_optimizer = Adam(ac.v.parameters(), lr=vf_lr)
 
-    # Set up model saving
-    logger.setup_pytorch_saver(ac)
-
-    def update():
+    def update(epoch):
         data = buf.get()
 
         pi_l_old, pi_info_old = compute_loss_pi(data)
@@ -259,12 +267,12 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             loss_pi, pi_info = compute_loss_pi(data)
             kl = pi_info['kl']
             if kl > 1.5 * target_kl:
-                logger.log('Early stopping at step %d due to reaching max kl.' % i)
+                writer.add_scalar('Early stopping due to reaching max kl', i, epoch)
                 break
             loss_pi.backward()
             pi_optimizer.step()
 
-        logger.store(StopIter=i)
+        writer.add_scalar('StopIter', i, epoch)
 
         # Value function learning
         for i in range(train_v_iters):
@@ -275,10 +283,14 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
         # Log changes from update
         kl, ent, cf = pi_info['kl'], pi_info_old['ent'], pi_info['cf']
-        logger.store(LossPi=pi_l_old, LossV=v_l_old,
-                     KL=kl, Entropy=ent, ClipFrac=cf,
-                     DeltaLossPi=(loss_pi.item() - pi_l_old),
-                     DeltaLossV=(loss_v.item() - v_l_old))
+        writer.add_scalar('Pi Loss', pi_l_old, epoch)
+        writer.add_scalar('Value Loss', v_l_old, epoch)
+        writer.add_scalar('KL divergence', kl, epoch)
+        writer.add_scalar('Entropy', ent, epoch)
+        writer.add_scalar('ClipFrac', cf, epoch)
+        writer.add_scalar('DeltaLossPi', loss_pi.item() - pi_l_old, epoch)
+        writer.add_scalar('DeltaLossV', loss_v.item() - v_l_old, epoch)
+
 
     # Prepare for interaction with environment
     start_time = time.time()
@@ -296,52 +308,28 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
             # save and log
             buf.store(o, a, r, v, logp)
-            logger.store(VVals=v)
+            n_step = epoch * local_steps_per_epoch + t
+            writer.add_scalar('VVals', v, n_step)
 
             # Update obs (critical!)
             o = next_o
 
-            timeout = ep_len == max_ep_len
-            terminal = d or timeout
             epoch_ended = t == (local_steps_per_epoch - 1)
-
-            if terminal or epoch_ended:
-                if epoch_ended and not terminal:
+            if d or epoch_ended:
+                if epoch_ended and not d:
                     print('Warning: trajectory cut off by epoch at %d steps.' % ep_len, flush=True)
                 # if trajectory didn't reach terminal state, bootstrap value target
-                if timeout or epoch_ended:
+                if truncated or epoch_ended:
                     _, v, _ = ac.step(torch.as_tensor(o, dtype=torch.float32))
                 else:
                     v = 0
                 buf.finish_path(v)
-                if terminal:
-                    # only save EpRet / EpLen if trajectory finished
-                    logger.store(EpRet=ep_ret, EpLen=ep_len)
+                writer.add_scalar('Episode Return', ep_ret, n_step)
+                writer.add_scalar('Episode Length', ep_len, n_step)
                 (o, _), ep_ret, ep_len = env.reset(), 0, 0
 
-        # Save model
-        if (epoch % save_freq == 0) or (epoch == epochs - 1):
-            logger.save_state({'env': env}, None)
-
         # Perform PPO update!
-        update()
-
-        # Log info about epoch
-        logger.log_tabular('Epoch', epoch)
-        logger.log_tabular('EpRet', with_min_and_max=True)
-        logger.log_tabular('EpLen', average_only=True)
-        logger.log_tabular('VVals', with_min_and_max=True)
-        logger.log_tabular('TotalEnvInteracts', (epoch + 1) * steps_per_epoch)
-        logger.log_tabular('LossPi', average_only=True)
-        logger.log_tabular('LossV', average_only=True)
-        logger.log_tabular('DeltaLossPi', average_only=True)
-        logger.log_tabular('DeltaLossV', average_only=True)
-        logger.log_tabular('Entropy', average_only=True)
-        logger.log_tabular('KL', average_only=True)
-        logger.log_tabular('ClipFrac', average_only=True)
-        logger.log_tabular('StopIter', average_only=True)
-        logger.log_tabular('Time', time.time() - start_time)
-        logger.dump_tabular()
+        update(epoch)
 
 
 if __name__ == '__main__':
@@ -359,10 +347,6 @@ if __name__ == '__main__':
     parser.add_argument('--exp_name', type=str, default='ppo')
     args = parser.parse_args()
 
-    from spinup.utils.run_utils import setup_logger_kwargs
-    logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
-
     ppo(lambda x: gym.make(args.env, max_episode_steps=x), actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l), gamma=args.gamma,
-        seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs,
-        logger_kwargs=logger_kwargs)
+        seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs)
