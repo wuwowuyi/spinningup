@@ -200,7 +200,7 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     np.random.seed(seed)
 
     # Instantiate environment
-    env = env_fn()
+    env = env_fn(max_ep_len)
     obs_dim = env.observation_space.shape
     act_dim = env.action_space.shape
 
@@ -362,7 +362,7 @@ if __name__ == '__main__':
     from spinup.utils.run_utils import setup_logger_kwargs
     logger_kwargs = setup_logger_kwargs(args.exp_name, args.seed)
 
-    ppo(lambda: gym.make(args.env), actor_critic=core.MLPActorCritic,
+    ppo(lambda x: gym.make(args.env, max_episode_steps=x), actor_critic=core.MLPActorCritic,
         ac_kwargs=dict(hidden_sizes=[args.hid] * args.l), gamma=args.gamma,
         seed=args.seed, steps_per_epoch=args.steps, epochs=args.epochs,
         logger_kwargs=logger_kwargs)
