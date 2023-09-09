@@ -1,0 +1,13 @@
+scipy
+gymnasium
+gymnasium[mujoco]
+torch
+tensorflow
+mpi4py
+joblib
+matplotlib
+tensorboard
+seaborn
+pandas
+tqdm
+psutil
