@@ -67,11 +67,11 @@ class VPGBuffer:
 
         # the next two lines implement GAE-Lambda advantage calculation
         # delta_t = r(o_t, a_t) + gamma * v(o_t+1) - v(o_t)
-        deltas = rews + self.gamma * vals[1:] - vals[:-1]
+        deltas = rews + self.gamma * vals[1:] - vals[:-1]  # each deltas[t] is TD error at t.
         self.adv_buf[path_slice] = core.discount_cumsum(deltas, self.gamma * self.lam)  # advantages
 
         # the next line computes rewards-to-go, to be targets for the value function
-        self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)  # returns
+        self.ret_buf[path_slice] = core.discount_cumsum(rews, self.gamma)  # discounted sum of rewards for an episode
 
         self.path_start_idx = self.ptr
 
