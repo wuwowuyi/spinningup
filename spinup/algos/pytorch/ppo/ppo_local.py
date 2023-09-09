@@ -10,7 +10,6 @@ import time
 from torch.utils.tensorboard import SummaryWriter
 
 import spinup.algos.pytorch.ppo.core as core
-from spinup.utils.logx import EpochLogger
 from spinup.utils.mpi_tools import proc_id, mpi_statistics_scalar
 
 
@@ -232,9 +231,13 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
         # Policy loss
         pi, logp = ac.pi(obs, act)
+
+        # Limit the loss_pi to avoid large gradient. Compared loss_pi with:
+        # trop algorithm loss_pi = -(p/p_old) * adv
+        # vpg algorithm loss_pi = -logp * adv
         ratio = torch.exp(logp - logp_old)
         clip_adv = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio) * adv
-        loss_pi = -(torch.min(ratio * adv, clip_adv)).mean()
+        loss_pi = -(torch.min(ratio * adv, clip_adv)).mean()  # necessary since adv can be negative
 
         # Useful extra info
         approx_kl = (logp_old - logp).mean().item()
@@ -265,10 +268,13 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         for i in range(train_pi_iters):
             pi_optimizer.zero_grad()
             loss_pi, pi_info = compute_loss_pi(data)
+
+            # Step in the proximity of lopp_old, by measuring kl-divergence(important!)
             kl = pi_info['kl']
             if kl > 1.5 * target_kl:
                 writer.add_scalar('Early stopping due to reaching max kl', i, epoch)
                 break
+
             loss_pi.backward()
             pi_optimizer.step()
 
