@@ -32,7 +32,7 @@ class SquashedGaussianMLPActor(nn.Module):
         super().__init__()
         self.net = mlp([obs_dim] + list(hidden_sizes), activation, activation)
         self.mu_layer = nn.Linear(hidden_sizes[-1], act_dim)
-        self.log_std_layer = nn.Linear(hidden_sizes[-1], act_dim)
+        self.log_std_layer = nn.Linear(hidden_sizes[-1], act_dim)  # diagonal std
         self.act_limit = act_limit
 
     def forward(self, obs, deterministic=False, with_logprob=True):
@@ -49,7 +49,7 @@ class SquashedGaussianMLPActor(nn.Module):
             pi_action = mu
         else:
             # see https://pytorch.org/docs/stable/distributions.html#pathwise-derivative
-            pi_action = pi_distribution.rsample()
+            pi_action = pi_distribution.rsample()  # use the reparameterization trick to be differentiable
 
         if with_logprob:
             # Compute logprob from Gaussian, and then apply correction for Tanh squashing.
