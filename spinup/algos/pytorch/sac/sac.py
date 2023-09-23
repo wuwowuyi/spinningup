@@ -207,7 +207,7 @@ def sac(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     # Set up function for computing SAC pi loss
     def compute_loss_pi(data):
         o = data['obs']
-        pi, logp_pi = ac.pi(o)
+        pi, logp_pi = ac.pi(o)  # sample action from current policy
         q1_pi = ac.q1(o, pi)
         q2_pi = ac.q2(o, pi)
         q_pi = torch.min(q1_pi, q2_pi)
