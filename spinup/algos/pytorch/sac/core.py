@@ -23,8 +23,8 @@ def count_vars(module):
     return sum([np.prod(p.shape) for p in module.parameters()])
 
 
-LOG_STD_MAX = 2
-LOG_STD_MIN = -20
+LOG_STD_MAX = 2  # e^2 is 7.39
+LOG_STD_MIN = -20  # e^(-20) is 2e-9. Is this to make sure std greater than 0?
 
 class SquashedGaussianMLPActor(nn.Module):
 
@@ -36,7 +36,7 @@ class SquashedGaussianMLPActor(nn.Module):
         self.act_limit = act_limit
 
     def forward(self, obs, deterministic=False, with_logprob=True):
-        net_out = self.net(obs)
+        net_out = self.net(obs)  # Mean and std share the same MLP network.
         mu = self.mu_layer(net_out)
         log_std = self.log_std_layer(net_out)
         log_std = torch.clamp(log_std, LOG_STD_MIN, LOG_STD_MAX)
@@ -48,6 +48,7 @@ class SquashedGaussianMLPActor(nn.Module):
             # Only used for evaluating policy at test time.
             pi_action = mu
         else:
+            # see https://pytorch.org/docs/stable/distributions.html#pathwise-derivative
             pi_action = pi_distribution.rsample()
 
         if with_logprob:
