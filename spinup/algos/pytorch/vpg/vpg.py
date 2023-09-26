@@ -240,7 +240,6 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(),  seed=0,
         data = buf.get()
 
         # Get loss and info values before update
-        # why do the computation here? data do not change
         pi_l_old, pi_info_old = compute_loss_pi(data)
         pi_l_old = pi_l_old.item()
         v_l_old = compute_loss_v(data).item()
@@ -312,7 +311,7 @@ def vpg(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(),  seed=0,
             logger.save_state({'env': env}, None)
 
         # Perform VPG update!
-        update()  # once every episode.
+        update()  # once every epoch.
 
         # Log info about epoch
         logger.log_tabular('Epoch', epoch)
