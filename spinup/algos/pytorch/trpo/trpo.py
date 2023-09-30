@@ -114,7 +114,7 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     var_counts = tuple(core.count_vars(module) for module in [ac.pi, ac.v])
 
     # setup tensorboard
-    writer = SummaryWriter(f'runs/{env.spec.id}-{datetime.now().strftime("%y-%m-%d %H%M%S")}')
+    writer = SummaryWriter(f'runs/trpo-{env.spec.id}-{datetime.now().strftime("%y-%m-%d %H%M%S")}')
     writer.add_text('hyperparameters',
         json.dumps(dict(env=env.spec.id, seed=seed,
                         vf_lr=vf_lr, gamma=gamma, lam=lam, delta=delta,
@@ -169,7 +169,7 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         # so we have hvp = d/dp(kl_grads) @ v
         kl_v = (kl_grads * v).sum()
         hvp = torch.autograd.grad(kl_v, ac.pi.parameters())  # Hessian vector product
-        hvp_flat = core.flat_concat(hvp).clone().detach()
+        hvp_flat = core.flat_concat(hvp).detach()
         return hvp_flat + v * damping_coeff
 
     def update_module_param(module, flat_params):
@@ -182,16 +182,14 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
     def linesearch(max_step, current_pi, current_params, current_loss, compute_loss):
         for i in range(backtrack_iters):
             new_params = current_params - backtrack_coeff**i * max_step
-            with torch.no_grad():
-                update_module_param(ac.pi, new_params)
+            update_module_param(ac.pi, new_params)
             new_pi, new_loss = compute_loss()  # recompute loss
             if new_loss <= current_loss:
                 kl = ac.pi.kl_divergence(current_pi, new_pi)  # recompute kl-divergence
                 if kl <= delta:
                     return True
         # restore old params
-        with torch.no_grad():
-            update_module_param(ac.pi, current_params)
+        update_module_param(ac.pi, current_params)
         return False
 
     def compute_pi_loss(obs, act, adv, old_logp, grad_enabled=False):
@@ -201,7 +199,6 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         else:
             ac.pi.zero_grad()
             pi, logp = ac.pi(obs, act)
-
         return pi, -(torch.exp(logp - old_logp) * adv).mean()
 
     def update(epoch):
@@ -213,15 +210,15 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
 
         _, loss_pi = compute_pi_loss(obs, act, adv, old_logp, True)
         grads = torch.autograd.grad(loss_pi, ac.pi.parameters())
-        loss_grad = core.flat_concat(grads).clone().detach()
+        loss_grad = core.flat_concat(grads).detach()
 
         hvp = functools.partial(Hvp, old_pi, obs, act)
-        s = cg(hvp, loss_grad)
+        s = cg(hvp, loss_grad)  # s = F^-1 * g, the natural gradient descent direction
         beta = torch.sqrt(2 * delta / (s * hvp(s)).sum())
-        old_params = core.flat_concat(ac.pi.parameters()).clone().detach()
-        result = linesearch(beta * s, old_pi, old_params, loss_pi,
-                   functools.partial(compute_pi_loss, obs, act, adv, old_logp, False))
-        print(f'line search was successful: {result}')
+        old_params = core.flat_concat(ac.pi.parameters()).detach()
+        with torch.no_grad():
+            linesearch(beta * s, old_pi, old_params, loss_pi,
+                       functools.partial(compute_pi_loss, obs, act, adv, old_logp, False))
 
         # Value function learning
         for i in range(train_v_iters):  # multiple steps on value function
@@ -285,7 +282,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='Swimmer-v4')
+    parser.add_argument('--env', type=str, default='CartPole-v1')
     parser.add_argument('--hid', type=int, default=64)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)
