@@ -160,7 +160,7 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         """
         ac.pi.zero_grad()
         new_pi, _ = ac.pi(obs, act)
-        kl = core.diagonal_gaussian_kl(old_pi, new_pi)
+        kl = ac.pi.kl_divergence(old_pi, new_pi)
         grads = torch.autograd.grad(kl, ac.pi.parameters(),
                                     create_graph=True)  # create_graph to compute higher order gradient
         kl_grads = core.flat_concat(grads)
@@ -190,7 +190,7 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
             set_flat_params_to(ac.pi, new_params)
             new_pi, new_loss = compute_loss()  # recompute loss
             if new_loss <= current_loss:
-                kl = core.diagonal_gaussian_kl(current_pi, new_pi)  # recompute kl-divergence
+                kl = ac.pi.kl_divergence(current_pi, new_pi)  # recompute kl-divergence
                 if kl <= delta:
                     return True
         # restore old params
@@ -288,7 +288,7 @@ if __name__ == '__main__':
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--env', type=str, default='Reacher-v4')
+    parser.add_argument('--env', type=str, default='Swimmer-v4')
     parser.add_argument('--hid', type=int, default=64)
     parser.add_argument('--l', type=int, default=2)
     parser.add_argument('--gamma', type=float, default=0.99)

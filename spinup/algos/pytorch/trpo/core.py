@@ -4,6 +4,7 @@ from gymnasium.spaces import Box, Discrete
 
 import torch
 import torch.nn as nn
+from torch.distributions import Categorical
 from torch.distributions.normal import Normal
 
 
@@ -50,20 +51,6 @@ def flat_concat(xs):
     return torch.cat([x.view(-1) for x in xs])
 
 
-def diagonal_gaussian_kl(old_pi, new_pi):
-    """
-    From
-    https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence#Multivariate_normal_distributions,
-    we can see KL-divergence between two diagonal Gaussians is simply the sum of k pairs univariate Gaussians.
-    The KL between two univariate Gaussians is: (var0 + (mu0 - mu1)^2)/2*var1  - 0.5 + log(std1/std0)
-    """
-    mu0, std0 = old_pi.mean, old_pi.stddev
-    mu1, std1 = new_pi.mean, new_pi.stddev
-    pre_sum = (std0**2 + (mu1 - mu0)**2)/(2 * std1**2 + EPS) - 0.5 + torch.log(std1) - torch.log(std0)
-    all_kls = pre_sum.sum(dim=1)
-    return all_kls.mean()
-
-
 class Actor(nn.Module):
     """Policy net (Actor). """
 
@@ -83,6 +70,14 @@ class Actor(nn.Module):
         :param pi: Probability distribution of actions.
         :param act: an action
         :return: log likelihood of act.
+        """
+        raise NotImplementedError
+
+    @staticmethod
+    def kl_divergence(one_dist, other_dist):
+        """
+        Compute the relative entropy from other_dist to one_dist,
+        i.e., D_kl(one||other)
         """
         raise NotImplementedError
 
@@ -113,6 +108,42 @@ class MLPGaussianActor(Actor):
     def _log_prob_from_distribution(self, pi, act):
         return pi.log_prob(act).sum(axis=-1)  # Last axis sum needed for Torch Normal distribution
 
+    @staticmethod
+    def kl_divergence(one_dist, other_dist):
+        """
+        From
+        https://en.wikipedia.org/wiki/Kullback%E2%80%93Leibler_divergence#Multivariate_normal_distributions,
+        we can see KL-divergence between two diagonal Gaussians is simply the sum of k pairs univariate Gaussians.
+        The KL between two univariate Gaussians is: (var0 + (mu0 - mu1)^2)/2*var1  - 0.5 + log(std1/std0)
+        """
+        assert isinstance(other_dist, Normal) and isinstance(one_dist, Normal)
+        mu0, std0 = one_dist.mean, one_dist.stddev
+        mu1, std1 = other_dist.mean, other_dist.stddev
+        pairs = (std0 ** 2 + (mu1 - mu0) ** 2) / (2 * std1 ** 2 + EPS) - 0.5 + torch.log(std1) - torch.log(std0)
+        kls = pairs.sum(dim=1)
+        return kls.mean()
+
+
+class MLPCategoricalActor(Actor):
+
+    def __init__(self, obs_dim, act_dim, hidden_sizes, activation):
+        super().__init__()
+        self.logits_net = mlp([obs_dim] + list(hidden_sizes) + [act_dim], activation)
+
+    def _distribution(self, obs):
+        logits = self.logits_net(obs)
+        return Categorical(logits=logits)
+
+    def _log_prob_from_distribution(self, pi, act):
+        return pi.log_prob(act)
+
+    @staticmethod
+    def kl_divergence(one_dist, other_dist):
+        assert isinstance(other_dist, Categorical) and isinstance(one_dist, Categorical)
+        old_p, old_logp = one_dist.probs, one_dist.logits
+        new_logp = other_dist.logits
+        kls = (old_p * (old_logp - new_logp)).sum(dim=1)
+        return kls.mean()
 
 class MLPCritic(nn.Module):
     """Value function (Critic).
@@ -137,7 +168,7 @@ class MLPActorCritic(nn.Module):
         if isinstance(action_space, Box):
             self.pi = MLPGaussianActor(obs_dim, action_space.shape[0], hidden_sizes, activation)
         elif isinstance(action_space, Discrete):
-            raise Exception("Support of discrete action space is not implemented.")
+            self.pi = MLPCategoricalActor(obs_dim, action_space.n, hidden_sizes, activation)
 
         # build value function
         self.v = MLPCritic(obs_dim, hidden_sizes, activation)
