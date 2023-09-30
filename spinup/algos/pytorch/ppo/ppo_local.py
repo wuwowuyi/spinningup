@@ -233,16 +233,15 @@ def ppo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         pi, logp = ac.pi(obs, act)
 
         # Limit the loss_pi to avoid large gradient. Compared loss_pi with:
-        # trop algorithm loss_pi = -(p/p_old) * adv
-        # vpg algorithm loss_pi = -logp * adv
+        # The implementation here is not strictly the same as the PPO paper.
         ratio = torch.exp(logp - logp_old)
         clip_adv = torch.clamp(ratio, 1 - clip_ratio, 1 + clip_ratio) * adv
         loss_pi = -(torch.min(ratio * adv, clip_adv)).mean()  # necessary since adv can be negative
 
         # Useful extra info
-        approx_kl = (logp_old - logp).mean().item()
+        approx_kl = (logp_old - logp).mean().item()  # good approximation!
         ent = pi.entropy().mean().item()
-        clipped = ratio.gt(1 + clip_ratio) | ratio.lt(1 - clip_ratio)
+        clipped = ratio.gt(1 + clip_ratio) | ratio.lt(1 - clip_ratio)  # element-wise, like torch.logical_or
         clipfrac = torch.as_tensor(clipped, dtype=torch.float32).mean().item()
         pi_info = dict(kl=approx_kl, ent=ent, cf=clipfrac)
 
