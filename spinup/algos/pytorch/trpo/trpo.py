@@ -172,29 +172,26 @@ def trpo(env_fn, actor_critic=core.MLPActorCritic, ac_kwargs=dict(), seed=0,
         hvp_flat = core.flat_concat(hvp).clone().detach()
         return hvp_flat + v * damping_coeff
 
-    def update_module_param(module, new_params):
-        params = core.flat_concat(module.parameters())
-        params.copy_(new_params)
-
-    def set_flat_params_to(model, flat_params):
-        prev_ind = 0
-        for param in model.parameters():
-            flat_size = int(np.prod(list(param.size())))
-            param.data.copy_(
-                flat_params[prev_ind:prev_ind + flat_size].view(param.size()))
-            prev_ind += flat_size
+    def update_module_param(module, flat_params):
+        pos = 0
+        for param in module.parameters():
+            flat_size = np.prod(param.shape)
+            param.view(-1).copy_(flat_params[pos:pos + flat_size])
+            pos += flat_size
 
     def linesearch(max_step, current_pi, current_params, current_loss, compute_loss):
         for i in range(backtrack_iters):
             new_params = current_params - backtrack_coeff**i * max_step
-            set_flat_params_to(ac.pi, new_params)
+            with torch.no_grad():
+                update_module_param(ac.pi, new_params)
             new_pi, new_loss = compute_loss()  # recompute loss
             if new_loss <= current_loss:
                 kl = ac.pi.kl_divergence(current_pi, new_pi)  # recompute kl-divergence
                 if kl <= delta:
                     return True
         # restore old params
-        update_module_param(ac.pi, current_params)
+        with torch.no_grad():
+            update_module_param(ac.pi, current_params)
         return False
 
     def compute_pi_loss(obs, act, adv, old_logp, grad_enabled=False):
